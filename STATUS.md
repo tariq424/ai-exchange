@@ -1,6 +1,6 @@
 # STATUS — updated by Claude after every round (sent to the reviewer with every question)
 
-Last update: 2026-10-28 18:52 EDT
+Last update: 2026-10-28 19:05 EDT
 
 ## Done (this evening)
 - Publisher `POST /delete` + `delete_video(dry_run)` + tests — written by DeepSeek, applied by Claude
@@ -13,9 +13,12 @@ Last update: 2026-10-28 18:52 EDT
   three-dot menu item "Delete"; dialog "Permanently delete this video?"; checkbox "I understand that deleting this
   video is permanent…"; buttons "Cancel" / "Delete forever". Dry run stops before "Delete forever", presses Cancel.
 
+- Video Studio beat editor in a popup (`/?job=<id>&popup=edit`) + TEST pill when port != 42021 — DeepSeek patch
+  (bfaf25c) applied on `feature/unified-ui` (0c52566) with Claude fixes: edit 5 re-anchored (closing braces differed),
+  title/Close shown in popup (inline display:none beat the CSS), popup video capped at 62vh, card text for interview
+  jobs. Tested on 42022 with a real Short: card, popup, video, scrubber, beat strip, six panes, source note.
+
 ## In progress
-- Video Studio beat editor in a popup (`/?job=<id>&popup=edit`) + TEST pill when port != 42021 — question out
-  (bc0a0b8). Claude applies it on `feature/unified-ui` and runs it on 42022.
 - Video Studio idle restart armed (10 h window) so the per-beat "Picture source" note goes live; the Newsroom is on
   hold (no new jobs) until that restart is done, then the hold lifts itself. No render is interrupted.
 
