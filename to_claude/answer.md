@@ -1,998 +1,438 @@
-1-line summary: implement the cross-process GPU barrier (`gpu_lock.py`), the one-active-editor priority reservation (`editor_session.py`), priority/editor-wait queueing in `pipeline.py`, editor-ownership GPU gating in `server.py`/`edit.py`/`interview_edit.py`, the UI heartbeat/waiting hooks, and unit tests.
+One-line summary: add per-job/tab editor sessions (`ED.sid`) with polling, heartbeats, close-on-pagehide and reservation/render banners, then add the two pytest files for `gpu_lock` and `editor_session`/`_StudioQueue`.
 
 ---
 
-## New module: `app/studio/gpu_lock.py`
+## 1. `app/static/index.html`
 
-```python
-"""Cross-process GPU barrier for Video Studio.
+### Edit 1 — insert helper block after the existing `edInit` line
 
-One renderer at a time on Tariq's single GPU. The lock is byte-range
-locked (msvcrt on Windows, fcntl elsewhere) so the OS releases it when
-the holder exits, even if it dies uncleanly.
-"""
-import argparse, contextlib, json, os, sys, threading, time
-from pathlib import Path
+**Old**
+```js
+async function edInit(){try{const d=await j(`/api/jobs/${sel}/edit/beats`);ED.beats=d.beats||[];ED.kind=d.kind;edBar(d)}catch(e){}}
+```
 
-if os.name == "nt":
-    import msvcrt
-else:
-    import fcntl
+**New**
+```js
+async function edInit(){try{const d=await j(`/api/jobs/${sel}/edit/beats`);ED.beats=d.beats||[];ED.kind=d.kind;edBar(d)}catch(e){}}
 
-_local = threading.Lock()
-_owner_tid = None
-_fh = None
-_desc = ""
-_held_since = 0.0
-
-def _settings():
-    try:
-        from . import config
-        return config.load()
-    except Exception:
-        return {}
-
-def lock_path():
-    p = _settings().get("gpu_lock_file") or os.environ.get("GPU_LOCK_FILE") or r"F:\code\gpu.lock"
-    return Path(p)
-
-def meta_path():
-    p = lock_path()
-    return p.with_name(p.name + ".json")
-
-def _write_meta(data):
-    p = meta_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + f".{threading.get_ident()}.tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    for _ in range(20):
-        try:
-            os.replace(tmp, p)
-            return
-        except PermissionError:
-            time.sleep(0.05)
-    try:
-        os.replace(tmp, p)
-    except Exception:
-        pass
-
-def _read_meta():
-    p = meta_path()
-    if not p.exists():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-def _lock_region(fh, block=True):
-    fh.seek(0, os.SEEK_SET)
-    if os.name == "nt":
-        mode = msvcrt.LK_LOCK if block else msvcrt.LK_NBLCK
-        msvcrt.locking(fh.fileno(), mode, 1)
-    else:
-        fh.seek(0, os.SEEK_SET)
-        fcntl.lockf(fh.fileno(), fcntl.LOCK_EX if block else fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-def _unlock_region(fh):
-    fh.seek(0, os.SEEK_SET)
-    if os.name == "nt":
-        try:
-            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-        except OSError:
-            pass
-    else:
-        fcntl.lockf(fh.fileno(), fcntl.LOCK_UN)
-
-def acquire(desc="gpu", timeout=None):
-    """Acquire the GPU barrier.
-
-    `timeout` only waits for the in-process holder; the cross-process
-    byte lock blocks until the other process releases it.
-    """
-    global _owner_tid, _fh, _desc, _held_since
-    p = lock_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-
-    got = _local.acquire(timeout=timeout) if timeout is not None else _local.acquire()
-    if not got:
-        return False
-
-    try:
-        if _owner_tid == threading.get_ident():
-            return True
-
-        fh = open(p, "a+b")
-        try:
-            fh.seek(0, os.SEEK_END)
-            if fh.tell() == 0:
-                fh.write(b"\0")
-                fh.flush()
-            fh.seek(0, os.SEEK_SET)
-            _lock_region(fh, block=True)
-        except Exception:
-            fh.close()
-            raise
-
-        _owner_tid = threading.get_ident()
-        _fh = fh
-        _desc = desc
-        _held_since = time.time()
-        _write_meta({
-            "pid": os.getpid(),
-            "thread": threading.get_ident(),
-            "desc": desc,
-            "t": _held_since,
-        })
-        return True
-    except Exception:
-        _local.release()
-        raise
-
-def release():
-    """Release the GPU barrier. Only the acquiring thread may release it."""
-    global _owner_tid, _fh, _desc, _held_since
-    tid = threading.get_ident()
-    if _owner_tid != tid or _fh is None:
-        return False
-
-    fh = _fh
-    _fh = None
-    _owner_tid = None
-    _desc = ""
-    _held_since = 0.0
-    try:
-        _unlock_region(fh)
-    finally:
-        fh.close()
-        _write_meta({})
-        _local.release()
-    return True
-
-def _probe_locked():
-    p = lock_path()
-    if not p.exists():
-        return False
-
-    fh = open(p, "a+b")
-    try:
-        if os.name != "nt":
-            fh.seek(0, os.SEEK_END)
-            if fh.tell() == 0:
-                fh.write(b"\0")
-                fh.flush()
-        _lock_region(fh, block=False)
-        return False
-    except OSError:
-        return True
-    finally:
-        try:
-            _unlock_region(fh)
-        except Exception:
-            pass
-        fh.close()
-
-def status():
-    """Return {held, pid, desc, age, file, ...}; usable by the UI and watchdog CLI."""
-    global _owner_tid
-    m = _read_meta()
-
-    if _owner_tid is not None and _fh is not None:
-        m = m or {}
-        m.update({
-            "held": True,
-            "pid": os.getpid(),
-            "desc": _desc,
-            "age": max(0.0, time.time() - _held_since),
-            "file": str(lock_path()),
-        })
-        return m
-
-    p = lock_path()
-    if not p.exists():
-        if m:
-            _write_meta({})
-        return {"held": False, "file": str(p)}
-
-    held = _probe_locked()
-    if not held:
-        if m:
-            _write_meta({})
-        return {"held": False, "file": str(p)}
-
-    m = m or {"pid": "?", "desc": "unknown", "t": time.time()}
-    m["held"] = True
-    m["age"] = max(0.0, time.time() - float(m.get("t", time.time())))
-    m["file"] = str(p)
-    return m
-
-def force_release(reason="manual force-release"):
-    """Manual CLI escape hatch for a hung-but-alive holder.
-
-    `msvcrt`/`fcntl` byte-range locks belong to the process that created
-    them, so another process cannot force-unlock the region. This marks
-    the metadata as forcibly released and tries to unlink the lock file;
-    the real OS lock is released when the hung process exits.
-    """
-    global _owner_tid, _fh, _desc, _held_since
-    if _owner_tid == threading.get_ident() and _fh is not None:
-        release()
-
-    _write_meta({"forced_release_at": time.time(), "reason": reason})
-    try:
-        lock_path().unlink()
-    except OSError:
-        pass
-    return status()
-
-@contextlib.contextmanager
-def holder(desc="gpu"):
-    acquire(desc=desc)
-    try:
-        yield
-    finally:
-        release()
-
-def _reset():
-    """Test helper: release anything held by this thread and clear stale metadata."""
-    release()
-    _write_meta({})
-
-def main(argv=None):
-    parser = argparse.ArgumentParser(description="GPU barrier for Video Studio")
-    sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("status", help="show the current holder")
-    sub.add_parser("force-release", help="manual escape hatch for a hung holder")
-    args = parser.parse_args(argv)
-
-    if args.cmd == "status":
-        print(json.dumps(status(), indent=2))
-    elif args.cmd == "force-release":
-        print(json.dumps(force_release(), indent=2))
-
-if __name__ == "__main__":
-    main()
+// ---- editor GPU reservation / session helpers (round 2b) ----
+function edSid(){
+  const key='vsedit.sid.'+sel;
+  let sid=sessionStorage.getItem(key);
+  if(!sid){sid=(crypto.randomUUID&&crypto.randomUUID())||('sid-'+Date.now()+'-'+Math.random().toString(16).slice(2));sessionStorage.setItem(key,sid);}
+  return sid;
+}
+function edStartTimers(){edStopTimers();ED.pollTimer=setInterval(edPoll,4000);ED.heartbeatTimer=setInterval(edHeartbeatIfActive,60000);}
+function edStopTimers(){clearInterval(ED.pollTimer);clearInterval(ED.heartbeatTimer);ED.pollTimer=ED.heartbeatTimer=null;}
+async function edPost(url,body){
+  body=body||{};body.sid=ED.sid;
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  let d={};try{d=await r.json()}catch(_){}
+  if(!r.ok){
+    const e=new Error(d.error||r.statusText||('HTTP '+r.status));
+    e.status=r.status;e.body=d;throw e;
+  }
+  return d;
+}
+function edSetApplyDisabled(disabled){
+  ED.applyDisabled=disabled;
+  document.querySelectorAll('#edp button').forEach(function(b){
+    const t=(b.textContent||'').replace(/\s+/g,' ').toLowerCase();
+    if(t.indexOf('apply')>=0||t.indexOf('skip')>=0)b.disabled=disabled;
+  });
+}
+function edShowResume(msg){
+  msg.textContent='';
+  const b=document.createElement('button');
+  b.type='button';b.textContent='Resume';b.className='ed-resume';
+  b.onclick=function(){if(ED.open!==undefined&&ED.open!==null)edOpen(ED.open);};
+  msg.append('Edit paused after 15 min — ',b);
+  ED.bannerText='paused';
+}
+function edRenderBanners(d){
+  let text='';let paused=false;let waiting=false;
+  const lock=d.lock||{};
+  if(lock.held&&!lock.mine){
+    text='A render is on the runway — your edit starts at its next safe point ('+(lock.desc||'gpu')+', '+(lock.age!=null?lock.age+'s':'')+')';
+  }else if(d.active===false&&!d.holder_jid){
+    paused=true;
+  }else if(d.owner===false&&d.holder_jid){
+    waiting=true;text='Waiting: editor in use ('+d.holder_jid+')';
+  }else if(d.waiting&&d.holder_jid){
+    waiting=true;text='Waiting: editor in use ('+d.holder_jid+')';
+  }
+  ED.waiting=waiting;edSetApplyDisabled(waiting);
+  const msg=$('edmsg');
+  if(msg&&paused){edShowResume(msg);return;}
+  if(msg&&!text&&ED.bannerText){msg.textContent='';ED.bannerText='';}
+  if(msg&&text){msg.textContent=text;ED.bannerText=text;}
+}
+function edBanner(ed){
+  if(!ed)return;
+  edRenderBanners({active:true,owner:ed.ok,holder_jid:ed.holder_jid,waiting:ed.waiting,lock:{}});
+}
+async function edPoll(){
+  if(!ED.sid)return;
+  try{
+    const r=await fetch(`/api/jobs/${sel}/editor?sid=${encodeURIComponent(ED.sid)}`,{cache:'no-store'});
+    const d=await r.json();
+    if(r.ok)edRenderBanners(d);
+  }catch(_){}
+}
+function edHeartbeatIfActive(){
+  if(!ED.sid||typeof sel==='undefined')return;
+  if(Date.now()-(ED.lastActivity||0)>60000)return;
+  fetch(`/api/jobs/${sel}/editor/heartbeat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid:ED.sid})}).catch(function(){});
+}
+function edCloseSession(){
+  if(!ED.sid||ED._closeSent)return;
+  ED._closeSent=true;edStopTimers();
+  const url=`/api/jobs/${sel}/editor/close`;
+  const body=JSON.stringify({sid:ED.sid});
+  try{
+    if(navigator.sendBeacon){navigator.sendBeacon(url,new Blob([body],{type:'application/json'}));}
+    else{fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:body,keepalive:true});}
+  }catch(_){}
+}
+function edMarkActivity(){ED.lastActivity=Date.now();}
+document.addEventListener('pointerdown',edMarkActivity,{passive:true});
+document.addEventListener('keydown',edMarkActivity,{passive:true});
+document.addEventListener('click',function(e){
+  const el=e.target.closest?e.target.closest('button,.ed-close,[data-close]'):null;
+  if(!el)return;
+  const t=(el.textContent||'').replace(/\s+/g,' ').toLowerCase();
+  if(t.indexOf('done editing')>=0||el.classList.contains('ed-close')||el.id==='edClose'||el.id==='edDone')edCloseSession();
+});
+window.addEventListener('pagehide',edCloseSession);
 ```
 
 ---
 
-## New module: `app/studio/editor_session.py`
+### Edit 2 — replace `edOpen`
+
+**Old**
+```js
+async function edOpen(bid){const v=$('ov');if(v)v.pause();$('edp').innerHTML='<p class="mut">Opening the beat…</p>';
+ try{const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.error);
+  ED.open=bid;ED.space=d.space;ED.rv=d.rv;const b=ED.rv.beats[bid];ED.sel=[...(b.current||[])];ED.fit='auto';ED.draft='';ED.chat=(await j(`/api/jobs/${sel}/edit/chat?beat=${bid}`)).chat;edDraw()}catch(e){$('edp').innerHTML=`<p style="color:var(--bad)">${esc(e.message)}</p>`}}
+```
+
+**New**
+```js
+async function edOpen(bid){const v=$('ov');if(v)v.pause();$('edp').innerHTML='<p class="mut">Opening the beat…</p>';
+ ED.sid=edSid();ED._closeSent=false;edStartTimers();
+ try{const d=await edPost(`/api/jobs/${sel}/edit/open/${bid}`,{});
+  ED.open=bid;ED.space=d.space;ED.rv=d.rv;const b=ED.rv.beats[bid];ED.sel=[...(b.current||[])];ED.fit='auto';ED.draft='';ED.chat=(await j(`/api/jobs/${sel}/edit/chat?beat=${bid}`)).chat;edDraw();edBanner(d.editor)}catch(e){if(e.status===409&&$('edmsg'))$('edmsg').textContent=e.message;$('edp').innerHTML=`<p style="color:var(--bad)">${esc(e.message)}</p>`}}
+```
+
+---
+
+### Edit 3 — replace `edApply`
+
+**Old**
+```js
+async function edApply(){if(!ED.sel.length)return;$('edmsg').textContent='Applying…';edRelease();try{await rvPost(`/api/jobs/${sel}/edit/apply/${ED.open}`,{cands:ED.sel,fit:ED.fit});edWait()}catch(e){$('edmsg').textContent='';edReload();alert(e.message)}}
+```
+
+**New**
+```js
+async function edApply(){if(!ED.sel.length||ED.waiting)return;$('edmsg').textContent='Applying…';edRelease();try{await edPost(`/api/jobs/${sel}/edit/apply/${ED.open}`,{cands:ED.sel,fit:ED.fit});edWait()}catch(e){$('edmsg').textContent='';edReload();if(e.status===409){if($('edmsg'))$('edmsg').textContent=e.message;return}alert(e.message)}}
+```
+
+---
+
+### Edit 4a — replace the re-open inside the `edWait` error path
+
+**Old**
+```js
+ if(d.error){edReload();if($('edmsg'))$('edmsg').textContent='✗ Not applied: '+d.error;const bid=ED.open;if(bid){const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const x=await r.json();if(r.ok){ED.rv=x.rv;edDraw();$('edmsg').textContent='✗ Not applied: '+d.error}}return}
+```
+
+**New**
+```js
+ if(d.error){edReload();if($('edmsg'))$('edmsg').textContent='✗ Not applied: '+d.error;const bid=ED.open;if(bid){try{const x=await edPost(`/api/jobs/${sel}/edit/open/${bid}`,{});if(x){ED.rv=x.rv;edDraw();$('edmsg').textContent='✗ Not applied: '+d.error}}catch(e){if(e.status===409&&$('edmsg'))$('edmsg').textContent=e.message}}return}
+```
+
+---
+
+### Edit 4b — replace the re-open inside the `edWait` success path
+
+**Old**
+```js
+ if($('edmsg'))$('edmsg').textContent='Applied. The video below is updated.';edReload();const bid=ED.open;if(bid){const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const x=await r.json();if(r.ok){ED.rv=x.rv;ED.sel=[...(ED.rv.beats[bid].current||[])];edDraw();$('edmsg').textContent='Applied. The video is updated.'}}}
+```
+
+**New**
+```js
+ if($('edmsg'))$('edmsg').textContent='Applied. The video below is updated.';edReload();const bid=ED.open;if(bid){try{const x=await edPost(`/api/jobs/${sel}/edit/open/${bid}`,{});if(x){ED.rv=x.rv;ED.sel=[...(ED.rv.beats[bid].current||[])];edDraw();$('edmsg').textContent='Applied. The video is updated.'}}catch(e){if(e.status===409&&$('edmsg'))$('edmsg').textContent=e.message}}}
+```
+
+---
+
+### Edit 5 — replace `edAll`
+
+**Old**
+```js
+async function edAll(a){try{await rvPost(`/api/jobs/${sel}/edit_all/${a}`);if(a=='undo'){edReload()}else{lastKey='';loadJobs()}}catch(e){alert(e.message)}}
+```
+
+**New**
+```js
+async function edAll(a){try{await edPost(`/api/jobs/${sel}/edit_all/${a}`,{});if(a=='undo'){edReload()}else{lastKey='';loadJobs()}}catch(e){if(e.status===409&&$('edmsg'))$('edmsg').textContent=e.message;else alert(e.message)}}
+```
+
+---
+
+## 2. `tests/test_gpu_lock.py`
 
 ```python
-"""One machine-wide editor session.
-
-The editor holds a priority reservation, not the raw GPU lock. The raw
-GPU lock is taken only for each apply / preview / undo / editor re-render.
-"""
-import json, os, time
+import json
+import os
+import subprocess
+import sys
+import time
 from pathlib import Path
 
-IDLE_LIMIT = 15 * 60
+import pytest
 
-def _settings():
-    try:
-        from . import config
-        return config.load()
-    except Exception:
-        return {}
+ROOT = Path(__file__).resolve().parents[1]
+APP = ROOT / "app"
+for p in (str(APP), str(ROOT)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-def reservation_path(namespace=None):
-    p = _settings().get("editor_reservation_file") or os.environ.get("GPU_RESERVATION_FILE") or r"F:\code\gpu.reservation.json"
-    p = Path(p)
-    if namespace:
-        return p.with_name(f"{p.stem}.{namespace}{p.suffix}")
-    return p
+from studio import gpu_lock
 
-def _write(data, namespace=None):
-    p = reservation_path(namespace)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    try:
-        os.replace(tmp, p)
-    except PermissionError:
-        time.sleep(0.05)
-        os.replace(tmp, p)
 
-def _pid_alive(pid):
-    if not pid:
-        return False
-    try:
-        os.kill(int(pid), 0)
-        return True
-    except OSError:
-        return False
-    except Exception:
-        return True
+def _reset_lock():
+    gpu_lock._fh = None
+    gpu_lock._owner = None
+    gpu_lock._depth = 0
+    gpu_lock._desc = ""
+    gpu_lock._since = 0.0
 
-def _read(namespace=None):
-    p = reservation_path(namespace)
-    if not p.exists():
-        return None
 
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+@pytest.fixture
+def lock_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPU_LOCK_FILE", str(tmp_path / "gpu.lock"))
+    monkeypatch.setenv("GPU_RESERVATION_FILE", str(tmp_path / "gpu.reservation.json"))
+    _reset_lock()
+    yield tmp_path
+    if gpu_lock.held_by_me():
+        gpu_lock.release()
+    _reset_lock()
 
-    if not isinstance(data, dict):
-        return None
 
-    if not _pid_alive(data.get("pid")):
-        _write({}, namespace)
-        return None
+def test_acquire_release(lock_env):
+    assert gpu_lock.acquire("edit", timeout=1)
+    assert gpu_lock.held_by_me()
 
-    if int(data.get("active_applies", 0)) == 0 and time.time() - float(data.get("last_activity", time.time())) > IDLE_LIMIT:
-        _write({}, namespace)
-        return None
+    st = gpu_lock.status()
+    assert st["held"] is True
+    assert st["desc"] == "edit"
 
-    return data
+    assert gpu_lock.release()
+    assert gpu_lock.status()["held"] is False
 
-def active(namespace=None):
-    return _read(namespace)
 
-def state(namespace=None):
-    cur = _read(namespace)
-    if not cur:
-        return None
-    cur = dict(cur)
-    cur["age"] = max(0.0, time.time() - float(cur.get("last_activity", time.time())))
-    return cur
+def test_second_process_cannot_acquire_while_held(lock_env):
+    ready = lock_env / "ready.txt"
 
-def acquire(jid, pid, port, sid="", active_applies=0, namespace=None):
-    now = time.time()
-    cur = _read(namespace)
-
-    if cur:
-        if cur.get("jid") != jid or (cur.get("sid") and sid and cur.get("sid") != sid):
-            return {
-                "ok": False,
-                "waiting": True,
-                "holder_jid": cur.get("jid"),
-                "holder_port": cur.get("port"),
-                "age": max(0.0, now - float(cur.get("last_activity", now))),
-            }
-        cur.update({
-            "pid": pid,
-            "port": port,
-            "last_activity": now,
-            "active_applies": int(active_applies or cur.get("active_applies", 0)),
-        })
-        if sid:
-            cur["sid"] = sid
-        _write(cur, namespace)
-        return {"ok": True, "owner": True, "age": 0.0}
-
-    data = {
-        "jid": jid,
-        "pid": pid,
-        "port": port,
-        "last_activity": now,
-        "active_applies": int(active_applies or 0),
-    }
-    if sid:
-        data["sid"] = sid
-    _write(data, namespace)
-    return {"ok": True, "owner": True, "age": 0.0}
-
-def is_owner(jid, pid, port, sid="", namespace=None):
-    cur = _read(namespace)
-    if not cur:
-        return False
-    return (
-        cur.get("jid") == jid
-        and str(cur.get("pid")) == str(pid)
-        and str(cur.get("port")) == str(port)
-        and (not cur.get("sid") or not sid or cur.get("sid") == sid)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(APP), str(ROOT)]
+        + [p for p in sys.path if p not in (str(APP), str(ROOT))]
     )
+    env["GPU_LOCK_FILE"] = str(lock_env / "gpu.lock")
 
-def heartbeat(jid, pid, port, sid="", active_applies=None, namespace=None):
-    cur = _read(namespace)
-    if not cur or cur.get("jid") != jid:
-        return {"ok": False, "error": "not the active editor session"}
-    if cur.get("sid") and sid and cur.get("sid") != sid:
-        return {"ok": False, "error": "not the active editor session"}
+    holder_code = f"""
+import time
+from studio import gpu_lock
 
-    cur.update({"pid": pid, "port": port, "last_activity": time.time()})
-    if active_applies is not None:
-        cur["active_applies"] = int(active_applies)
-    _write(cur, namespace)
-    return {"ok": True}
+gpu_lock.acquire("holder", timeout=2)
+open({str(ready)!r}, "w").write("ok")
+time.sleep(1.2)
+gpu_lock.release()
+"""
+    holder = subprocess.Popen([sys.executable, "-c", holder_code], env=env)
 
-def release(jid=None, pid=None, port=None, sid="", force=False, namespace=None):
-    cur = _read(namespace)
-    if not cur:
-        return True
+    try:
+        for _ in range(80):
+            if ready.exists():
+                break
+            time.sleep(0.05)
+        else:
+            holder.kill()
+            raise AssertionError("holder did not become ready")
 
-    jid_ok = jid is None or cur.get("jid") == jid
-    pid_ok = pid is None or str(cur.get("pid")) == str(pid)
-    port_ok = port is None or str(cur.get("port")) == str(port)
-    sid_ok = not sid or not cur.get("sid") or cur.get("sid") == sid
+        probe = subprocess.run(
+            [sys.executable, "-c", "from studio import gpu_lock; print(gpu_lock.acquire('probe', timeout=0.3))"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert probe.returncode == 0
+        assert probe.stdout.strip() == "False"
+    finally:
+        holder.wait(timeout=3)
 
-    if force or (jid_ok and pid_ok and port_ok and sid_ok):
-        _write({}, namespace)
-        return True
-    return False
+    assert gpu_lock.acquire("after-holder-exit", timeout=1)
+    gpu_lock.release()
 
-def _reset(namespace=None):
-    _write({}, namespace)
+
+def test_nested_acquire_release_keeps_lock_until_outer_release(lock_env):
+    assert gpu_lock.acquire("outer")
+    assert gpu_lock.acquire("inner")
+
+    assert gpu_lock.release()
+    assert gpu_lock.status()["held"] is True
+
+    assert gpu_lock.release()
+    assert gpu_lock.status()["held"] is False
+
+
+def test_status_does_not_trust_stale_metadata(lock_env):
+    lock_file = lock_env / "gpu.lock"
+    lock_file.write_bytes(b"\0")
+
+    stale = {
+        "pid": os.getpid(),
+        "desc": "stale-metadata",
+        "t": time.time(),
+    }
+    gpu_lock.meta_path().write_text(json.dumps(stale), encoding="utf-8")
+
+    st = gpu_lock.status()
+    assert st["held"] is False
 ```
 
 ---
 
-## Existing file patches
-
-### `app/studio/pipeline.py`
-
-#### 1. Import and queue/GPU constants
-
-```diff
--from . import config, transcript, writer, render, assemble, media, sources, short, debug
-+from . import config, transcript, writer, render, assemble, media, sources, short, debug, gpu_lock
-```
-
-```diff
- SMOKE_SECS = 30.0   # "smoke test" Shorts: about 75 words of narration including the closing line
-+
-+GPU_STAGES = {"short_voice", "short_fallback", "voice", "presenter", "motion", "stills"}
-+
-+
-+class _StudioQueue:
-+    """Priority queue: editor-owned work, then Newsroom jobs, then hand jobs.
-+
-+    Existing `Studio.q.put(jid)` call sites stay unchanged.
-+    """
-+    def __init__(self, studio):
-+        self._q = queue.PriorityQueue()
-+        self._studio = studio
-+        self._seq = 0
-+        self._lk = threading.Lock()
-+
-+    def put(self, jid):
-+        with self._lk:
-+            self._seq += 1
-+            self._q.put((self._studio._prio(jid), self._seq, jid))
-+
-+    def get(self):
-+        return self._q.get()[2]
-```
-
-#### 2. Studio init, guard, priority helpers, editor wait watcher
-
-Replace:
-
-```python
-    def __init__(self):
-        self.q = queue.Queue(); self.current = None; self.cancel = set()
-        try:   # jobs cut off by an app restart or PC reboot: show them as stopped (press Resume) instead of a stale "running"
-            for d in self.jobs_dir().iterdir():
-                if d.is_dir() and (d / "state.json").exists():
-                    j = Job(d)
-                    if j.state.get("status") in ("running", "queued"):
-                        j.save(status="stopped"); j.log("Interrupted (the app or PC restarted). Press Resume to continue; finished work is kept.")
-        except Exception: pass
-        threading.Thread(target=self._worker, daemon=True).start()
-```
-
-with:
-
-```python
-    def __init__(self, port=None):
-        self.port = port
-        self.live = port in (None, "42021", 42021)
-        self.q = _StudioQueue(self)
-        self.current = None; self.cancel = set()
-        self._editor_waits = {}
-        self._editor_waits_lk = threading.Lock()
-        if not self.live:
-            self._refuse_live_jobs_dir()
-        try:   # jobs cut off by an app restart or PC reboot: show them as stopped (press Resume) instead of a stale "running"
-            for d in self.jobs_dir().iterdir():
-                if d.is_dir() and (d / "state.json").exists():
-                    j = Job(d)
-                    if j.state.get("status") in ("running", "queued"):
-                        j.save(status="stopped"); j.log("Interrupted (the app or PC restarted). Press Resume to continue; finished work is kept.")
-        except Exception: pass
-        threading.Thread(target=self._editor_wait_watcher, daemon=True).start()
-        threading.Thread(target=self._worker, daemon=True).start()
-```
-
-After `def list(...)` add:
-
-```python
-    def _prio(self, jid):
-        try:
-            s = self.job(jid).state
-        except Exception:
-            return 2
-        if s.get("editor_owned"):
-            return 0
-        if s.get("newsroom") or s.get("priority") == "newsroom":
-            return 1
-        return 2
-
-    def _enqueue(self, jid):
-        self.q.put(jid)
-
-    def _refuse_live_jobs_dir(self):
-        live_settings = Path(r"F:\code\video-studio-test\settings.json")
-        if not live_settings.exists():
-            return
-        try:
-            import json as _json
-            live_jobs = os.path.normpath(str(_json.loads(live_settings.read_text(encoding="utf-8")).get("jobs_dir", "")))
-            my_jobs = os.path.normpath(str(config.load().get("jobs_dir", "")))
-            if live_jobs and my_jobs == live_jobs:
-                raise RuntimeError(f"Refusing to start this copy: it points at the live jobs_dir ({live_jobs})")
-        except RuntimeError:
-            raise
-        except Exception:
-            pass
-
-    def _wait_editor_reservation(self, j, s, log, jid):
-        from . import editor_session
-        res = editor_session.active()
-        if not res:
-            return False
-
-        label = f"Waiting: editor in use ({res.get('jid')})"
-        if s.get("status") != "paused" or (s.get("pause") or {}).get("label") != label:
-            j.save(status="paused", pause={"kind": "editor_wait", "label": label,
-                                          "stage": s.get("stage"), "where": s.get("stage")}, pause_req=False)
-            j.log(label + f" (holder pid {res.get('pid')}, port {res.get('port')}); it will continue automatically when the editor session releases.")
-            with self._editor_waits_lk:
-                self._editor_waits[jid] = time.time()
-        return True
-
-    def _requeue_editor_waits(self):
-        from . import editor_session
-        if editor_session.active():
-            return
-
-        with self._editor_waits_lk:
-            waits = list(self._editor_waits.items())
-            self._editor_waits.clear()
-
-        for jid, _ in waits:
-            try:
-                job = self.job(jid)
-            except Exception:
-                continue
-            if job.state.get("status") == "paused" and (job.state.get("pause") or {}).get("kind") == "editor_wait":
-                job.save(status="queued", pause=None, pause_req=False, cancel_req=False, cancelled=False)
-                job.log("Editor session released; continuing automatically.")
-                self._enqueue(jid)
-
-    def _editor_wait_watcher(self):
-        while True:
-            time.sleep(1.0)
-            try:
-                self._requeue_editor_waits()
-            except Exception:
-                pass
-```
-
-#### 3. `create` signature and queue put
-
-```diff
-     def create(self, url, minutes, presenter=False, auto_approve=False, transcript_text="", provider="", captions=True,
-                mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit="", visual_review="auto", dbg_on=False, bps=None,
--               own_clips=None, tts_engine="", audience=""):
-+               own_clips=None, tts_engine="", audience="", newsroom=False):
-```
-
-```diff
--               upload=up, src_title=src_title, src_credit=src_credit, visual_review=visual_review if visual_review in ("auto", "every", "never") else "auto", status="queued", stage="transcript", done=[], title="", created=time.time(),
--               debug={"on": bool(dbg_on), "bps": list(bps or []), "bps_off": False, "checked": [], "chat": []}, trace=bool(dbg_on))
-+               upload=up, src_title=src_title, src_credit=src_credit, visual_review=visual_review if visual_review in ("auto", "every", "never") else "auto", status="queued", stage="transcript", done=[], title="", created=time.time(),
-+               newsroom=bool(newsroom), priority=("newsroom" if newsroom else "normal"),
-+               debug={"on": bool(dbg_on), "bps": list(bps or []), "bps_off": False, "checked": [], "chat": []}, trace=bool(dbg_on))
-```
-
-```diff
--        j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self.q.put(jid); return jid
-+        j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self._enqueue(jid); return jid
-```
-
-#### 4. `approve`, `continue_visuals`, `rerender`, `resume`, retry queue puts
-
-```diff
--            d = s.get("done", []); d.append("review"); j.save(done=d, status="queued"); j.log("Script approved"); self.q.put(jid)
-+            d = s.get("done", []); d.append("review"); j.save(done=d, status="queued"); j.log("Script approved"); self._enqueue(jid)
-```
-
-```diff
--        j.save(done=d, status="queued"); j.log("Visual review done; rendering"); self.q.put(jid)
-+        j.save(done=d, status="queued"); j.log("Visual review done; rendering"); self._enqueue(jid)
-```
-
-```diff
--    def rerender(self, jid, target="", refresh_fallbacks=False):
-+    def rerender(self, jid, target="", refresh_fallbacks=False, editor_owned=False):
-```
-
-```diff
--        j.save(done=d, status="queued"); j.log("Full re-render requested"); self.q.put(jid)
-+        if editor_owned:
-+            j.save(editor_owned=True)
-+        j.save(done=d, status="queued"); j.log("Full re-render requested"); self._enqueue(jid)
-```
-
-```diff
--        j.save(status="queued", error="", pause=None, pause_req=False, cancel_req=False, cancelled=False); j.log("Resumed"); self.q.put(jid)
-+        j.save(status="queued", error="", pause=None, pause_req=False, cancel_req=False, cancelled=False); j.log("Resumed"); self._enqueue(jid)
-```
-
-```diff
--                    threading.Timer(60, lambda jid=jid: self.q.put(jid)).start()
-+                    threading.Timer(60, lambda jid=jid: self._enqueue(jid)).start()
-```
-
-#### 5. `_worker` finally releases raw GPU lock
-
-```diff
-             finally:
-                 self.current = None
-                 try:   # a job never leaves an on-demand WanGP holding VRAM (error, cancel or success)
-                     from . import wangp as _wangp; _wangp.release(print, "job ended")
-                 except Exception: pass
-+                try:
-+                    gpu_lock.release()
-+                except Exception:
-+                    pass
-```
-
-#### 6. `_stages` start and GPU gating
-
-Replace this block:
-
-```python
-    def _stages(self, j, s, cfg, wg, log, stop, dbg, jid):
-        mode = s.get("mode", "long")
-        for st in stages_for(mode):
-            if st in j.state.get("done", []): continue
-            if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
-            dbg.manual(st)
-            j.save(prog={"out": output_of(st), "stage": st, "n": 0, "of": 0})
-            j.save(stage=st); log(f"== {st} ==")
-```
-
-with:
-
-```python
-    def _stages(self, j, s, cfg, wg, log, stop, dbg, jid):
-        mode = s.get("mode", "long")
-        gpu_held = False
-
-        def release_gpu():
-            nonlocal gpu_held
-            if gpu_held:
-                gpu_lock.release()
-                gpu_held = False
-
-        for st in stages_for(mode):
-            if st in j.state.get("done", []): continue
-
-            if gpu_held and st not in GPU_STAGES:
-                release_gpu()
-
-            if stop():
-                release_gpu()
-                j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
-
-            if st in GPU_STAGES:
-                if self.live and not j.state.get("editor_owned"):
-                    if self._wait_editor_reservation(j, s, log, jid):
-                        release_gpu()
-                        return
-                if not gpu_held:
-                    gpu_lock.acquire(desc=f"job:{jid}:{st}")
-                    gpu_held = True
-
-            dbg.manual(st)
-            j.save(prog={"out": output_of(st), "stage": st, "n": 0, "of": 0})
-            j.save(stage=st); log(f"== {st} ==")
-```
-
-#### 7. Release GPU before early returns inside `_stages`
-
-```diff
-                     j.save(status="awaiting_visuals")
-                     debug.trace(j.dir, {"ev": "pause", "label": "Paused: uncertain about this beat",
-                                         "beats": ", ".join(f"Beat {int(b[1:]) + 1}" for b, x in rv["beats"].items() if x.get("uncertain") and not x.get("decision"))})
-                     debug.render_md(j.dir)
-+                    release_gpu()
-                     log("Visual review: choose a treatment for each beat on the job page (or Approve all remaining)." if vm == "every" else
-                         "Visual review: some beats are uncertain; check them on the job page (or Approve all remaining)."); return
-```
-
-```diff
-                 qs = [q for p in (j.plan(), j.short_plan()) if p for q in p.get("questions", [])]
-                 if not s.get("auto_approve", True):
-+                    release_gpu()
-                     j.save(status="awaiting_review"); log("Script ready for review. Edit if you like, then press Approve."); return
-                 if qs and cfg.get("pause_on_questions", False):
-+                    release_gpu()
-                     j.save(status="awaiting_review"); log(f"Fact-check raised {len(qs)} question(s); paused for review (setting: pause on fact-check questions)."); return
-```
-
-```diff
--            if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
-+            if stop():
-+                release_gpu()
-+                j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
-             d = j.state.get("done", []); d.append(st); j.save(done=d)
-+        release_gpu()
-         if cfg.get("qc_on", False):   # (off until calibrated: the first run flagged most news frames) owner, 2026-10-24: frame QC on every video (fingers, smudges, sideways, blur, giant faces)
-```
-
----
-
-### `app/server.py`
-
-#### 1. Port-plus-Studio guard
-
-Add near the top, before `studio = Studio()`:
+## 3. `tests/test_editor_priority.py`
 
 ```python
 import os
-VS_PORT = int(os.environ.get("VS_PORT", "42021"))
-studio = Studio(port=VS_PORT)
-```
+import subprocess
+import sys
+import time
+from pathlib import Path
 
-If `os` is already imported, do not add a duplicate import. If `studio = Studio()` appears differently, replace that call with `Studio(port=VS_PORT)`.
+import pytest
 
-#### 2. Editor helpers
+ROOT = Path(__file__).resolve().parents[1]
+APP = ROOT / "app"
+for p in (str(APP), str(ROOT)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-Insert before the first edit route:
+from studio import editor_session
+from studio.pipeline import _StudioQueue
 
-```python
-def _editor_ns():
-    return None if VS_PORT == 42021 else str(VS_PORT)
 
-def _editor_owner(jid, sid):
-    from studio import editor_session
-    st = editor_session.state(namespace=_editor_ns())
-    if not st:
-        return False, "No editor session is open; open a beat first."
-    if st.get("jid") != jid or not editor_session.is_owner(jid, os.getpid(), VS_PORT, sid, namespace=_editor_ns()):
-        return False, f"Waiting: editor in use ({st.get('jid')})"
-    return True, st
-```
+@pytest.fixture
+def res_env(tmp_path, monkeypatch):
+    monkeypatch.setattr(editor_session, "_settings", lambda: {})
+    monkeypatch.setattr(editor_session, "IDLE_LIMIT", 0.05)
+    monkeypatch.setenv("GPU_RESERVATION_FILE", str(tmp_path / "reservation.json"))
+    monkeypatch.setenv("GPU_LOCK_FILE", str(tmp_path / "gpu.lock"))
 
-#### 3. Open editor beat
+    p = editor_session.reservation_path()
+    if p.exists():
+        p.unlink()
 
-Replace:
+    yield tmp_path
 
-```python
-@app.post("/api/jobs/<jid>/edit/open/<bid>")
-def edit_open(jid, bid):
-    from studio import edit
-    j = studio.job(jid)
-    try: rv = edit.open_beat(j.dir, bid, config.load(), j.log)
-    except Exception as e: return jsonify(error=str(e)[:300]), 400
-    return jsonify(space="short" if edit.kind(j.dir) == "short" else "long", rv=rv)
-```
+    p.unlink(missing_ok=True)
 
-with:
 
-```python
-@app.post("/api/jobs/<jid>/edit/open/<bid>")
-def edit_open(jid, bid):
-    from studio import edit, editor_session
-    j = studio.job(jid)
-    b = request.get_json(silent=True) or {}
-    sid = b.get("sid", "")
-    ed = editor_session.acquire(jid, pid=os.getpid(), port=VS_PORT, sid=sid, namespace=_editor_ns())
-    try: rv = edit.open_beat(j.dir, bid, config.load(), j.log)
-    except Exception as e: return jsonify(error=str(e)[:300]), 400
-    return jsonify(space="short" if edit.kind(j.dir) == "short" else "long", rv=rv,
-                   editor={"ok": ed.get("ok", False), "waiting": ed.get("waiting", False),
-                           "holder_jid": ed.get("holder_jid"), "holder_port": ed.get("holder_port"),
-                           "age": ed.get("age", 0)})
-```
+class FakeStudio:
+    def __init__(self, prios):
+        self.prios = prios
 
-#### 4. Chat is browse-only, allowed for read-only popups
+    def _prio(self, jid):
+        return self.prios[jid]
 
-```diff
-     if not text or not b.get("beat"): return jsonify(error="type a message (and open a beat)"), 400
--    if studio.current: return jsonify(error="A job is rendering right now; edit when it has finished."), 409
-     if _interview(jid):
-```
 
-#### 5. Edit action guard and raw GPU lock
+def test_studio_queue_priority_order_and_fifo():
+    prios = {
+        "editor-first": 0,
+        "newsroom-first": 1,
+        "hand-first": 2,
+        "newsroom-second": 1,
+        "editor-second": 0,
+        "hand-second": 2,
+    }
+    q = _StudioQueue(FakeStudio(prios))
 
-Replace:
+    for jid in ["hand-first", "newsroom-first", "editor-first", "editor-second", "hand-second", "newsroom-second"]:
+        q.put(jid)
 
-```python
-@app.post("/api/jobs/<jid>/edit/<action>/<bid>")
-def edit_act(jid, action, bid):
-    from studio import edit
-    j = studio.job(jid); b = request.get_json(silent=True) or {}; cfg = config.load()
-    if studio.current: return jsonify(error="A job is rendering right now; edit when it has finished."), 409
-    try:
-        if action == "preview": return jsonify(edit.preview(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log))
-        if action == "apply":
-            err = edit.start_apply(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log)
-            return (jsonify(error=err), 409) if err else jsonify(ok=True)
-    except Exception as e: return jsonify(error=str(e)[:300]), 400
-    return jsonify(error="unknown action"), 400
-```
+    expected = [
+        "editor-first",
+        "editor-second",
+        "newsroom-first",
+        "newsroom-second",
+        "hand-first",
+        "hand-second",
+    ]
+    assert [q.get() for _ in range(6)] == expected
 
-with:
 
-```python
-@app.post("/api/jobs/<jid>/edit/<action>/<bid>")
-def edit_act(jid, action, bid):
-    from studio import edit, gpu_lock
-    j = studio.job(jid); b = request.get_json(silent=True) or {}; cfg = config.load()
-    sid = b.get("sid", "")
-    ok, holder = _editor_owner(jid, sid)
-    if not ok:
-        return jsonify(error=holder), 409
-    try:
-        if action == "preview":
-            with gpu_lock.holder(desc=f"editor-preview:{jid}:{bid}"):
-                return jsonify(edit.preview(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log))
-        if action == "apply":
-            err = edit.start_apply(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log)
-            return (jsonify(error=err), 409) if err else jsonify(ok=True)
-    except Exception as e:
-        return jsonify(error=str(e)[:300]), 400
-    return jsonify(error="unknown action"), 400
-```
+def test_editor_session_acquire_and_second_jid_waits(res_env):
+    rv1 = editor_session.acquire("job1", pid=os.getpid(), port=42022, sid="sid-1")
+    assert rv1["ok"] is True
 
-#### 6. Edit-all: undo/rerender under editor ownership
+    rv2 = editor_session.acquire("job2", pid=os.getpid(), port=42022, sid="sid-2")
+    assert rv2["ok"] is False
+    assert rv2["waiting"] is True
+    assert rv2["holder_jid"] == "job1"
 
-Replace:
 
-```python
-@app.post("/api/jobs/<jid>/edit_all/<action>")
-def edit_all(jid, action):
-    from studio import edit, review
-    j = studio.job(jid)
-    try:
-        if action == "undo": edit.undo(j.dir, j.log)
-        elif action == "rerender":
-            b = request.get_json(silent=True) or {}
-            studio.rerender(jid, str(b.get("target") or ""), bool(b.get("refresh_fallbacks")))
-        elif action == "cleanup":
-            review.prune(j.dir, j.log, full=True)
-            if (j.dir / "longedit").exists(): review.prune(j.dir / "longedit", j.log, full=True)
-        else: return jsonify(error="unknown action"), 400
-```
+def test_idle_release_only_when_no_active_applies(res_env):
+    assert editor_session.acquire("job1", pid=os.getpid(), port=42022).get("ok")
+    time.sleep(0.08)
+    assert editor_session.active() is None
 
-with:
+    assert editor_session.acquire("job2", pid=os.getpid(), port=42022).get("ok")
+    editor_session.apply_started("job2")
+    time.sleep(0.08)
+    assert editor_session.active() is not None
 
-```python
-@app.post("/api/jobs/<jid>/edit_all/<action>")
-def edit_all(jid, action):
-    from studio import edit, review, gpu_lock
-    j = studio.job(jid)
-    b = request.get_json(silent=True) or {}
-    sid = b.get("sid", "")
-    try:
-        if action == "undo":
-            ok, holder = _editor_owner(jid, sid)
-            if not ok:
-                return jsonify(error=holder), 409
-            with gpu_lock.holder(desc=f"editor-undo:{jid}"):
-                edit.undo(j.dir, j.log)
-        elif action == "rerender":
-            ok, holder = _editor_owner(jid, sid)
-            if not ok:
-                return jsonify(error=holder), 409
-            studio.rerender(jid, str(b.get("target") or ""), bool(b.get("refresh_fallbacks")), editor_owned=True)
-        elif action == "cleanup":
-            review.prune(j.dir, j.log, full=True)
-            if (j.dir / "longedit").exists(): review.prune(j.dir / "longedit", j.log, full=True)
-        else: return jsonify(error="unknown action"), 400
-```
+    editor_session.apply_finished("job2")
+    time.sleep(0.08)
+    assert editor_session.active() is None
 
-#### 7. `/make/edit`
 
-Replace:
-
-```python
-    if studio.current: return jsonify(error="A job is rendering right now; edit when it has finished."), 409
-    err = edit.start_apply(j.dir, b.get("beat", ""), b.get("cands") or [], b.get("fit", "auto"), config.load(), j.log)
-    return (jsonify(error=err), 409) if err else jsonify(ok=True)
-```
-
-with:
-
-```python
-    sid = b.get("sid", "")
-    ok, holder = _editor_owner(b.get("job", ""), sid)
-    if not ok:
-        return jsonify(error=holder), 409
-    err = edit.start_apply(j.dir, b.get("beat", ""), b.get("cands") or [], b.get("fit", "auto"), config.load(), j.log)
-    return (jsonify(error=err), 409) if err else jsonify(ok=True)
-```
-
-#### 8. New editor polling/heartbeat/close routes
-
-Insert after `edit_all`:
-
-```python
-@app.get("/api/jobs/<jid>/editor")
-def editor_status(jid):
-    from studio import editor_session, gpu_lock
-    sid = request.args.get("sid", "")
-    st = editor_session.state(namespace=_editor_ns())
-    return jsonify(
-        active=bool(st),
-        owner=bool(st and editor_session.is_owner(jid, os.getpid(), VS_PORT, sid, namespace=_editor_ns())),
-        holder_jid=st.get("jid") if st else None,
-        holder_port=st.get("port") if st else None,
-        age=st.get("age", 0) if st else 0,
-        active_applies=st.get("active_applies", 0) if st else 0,
-        lock=gpu_lock.status(),
-    )
-
-@app.post("/api/jobs/<jid>/editor/heartbeat")
-def editor_heartbeat(jid):
-    from studio import editor_session
-    b = request.get_json(silent=True) or {}
-    rv = editor_session.heartbeat(
-        jid, os.getpid(), VS_PORT, b.get("sid", ""),
-        b.get("active_applies"), namespace=_editor_ns(),
-    )
-    return jsonify(ok=rv.get("ok", False), error=rv.get("error"))
-
-@app.post("/api/jobs/<jid>/editor/close")
-def editor_close(jid):
-    from studio import editor_session
-    b = request.get_json(silent=True) or {}
-    editor_session.release(
-        jid, pid=os.getpid(), port=VS_PORT,
-        sid=b.get("sid", ""), namespace=_editor_ns(),
-    )
-    return jsonify(ok=True)
+def test_pid_alive_false_for_dead_pid(res_env):
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait(timeout=5)
+    assert editor_session._pid_alive(p.pid) is False
 ```
 
 ---
 
-### `app/studio/edit.py`
+## 3. How Claude should test it
 
-Replace the `start_apply` background runner’s try body:
+Run from the repo root:
 
-```python
-    def run():
-        from .pipeline import Job
-        try: apply(job, bid, cids, fit, cfg, log)
-        except Exception as e:
+```bash
+python -m pytest tests/test_gpu_lock.py tests/test_editor_priority.py -q
 ```
 
-with:
+Then start the TEST Video Studio instance on a non-42021 port and manually verify in a real Short:
 
-```python
-    def run():
-        from .pipeline import Job
-        from . import gpu_lock
-        try:
-            with gpu_lock.holder(desc=f"editor-apply:{Path(job).name}:{bid}"):
-                apply(job, bid, cids, fit, cfg, log)
-        except Exception as e:
-```
-
-The rest of the function stays unchanged.
+1. Open a beat. In DevTools network, confirm:
+   - `POST /api/jobs/<jid>/edit/open/<bid>` body contains `sid`.
+   - `GET /api/jobs/<jid>/editor?sid=...` fires every ~4 s.
+   - `POST /api/jobs/<jid>/editor/heartbeat` fires only after recent mouse/key activity.
+2. Close the editor window/tab and confirm `POST /api/jobs/<jid>/editor/close` is sent.
+3. While the GPU is busy (or another editor has the reservation), confirm the correct banner appears and Apply/Skip buttons are disabled.
+4. Force a 409 from an editor action and confirm the error appears in `#edmsg`, not an `alert()`.
 
 ---
 
-### `app/studio/interview_edit.py`
+## 4. Anything unsure about / missing
 
-Replace:
-
-```python
-    def run():
-        from .pipeline import Job
-        from . import review
-        try:
-            m, i, p = _part(job, bid, k)
-            n = len(list((Path(job) / "iedit" / "parts").glob(f"{k}_{bid}_*.mp4"))) if (Path(job) / "iedit" / "parts").exists() else 0
-            new = Path(job) / "iedit" / "parts" / f"{k}_{bid}_{n + 1}.mp4"; new.parent.mkdir(parents=True, exist_ok=True)
-            _render_piece(job, bid, cids, new)
-            hist = m.setdefault("history", []); hist.append({"bid": bid, "old": p["file"], "new": str(new), "t": time.time()})
-            p["file"] = str(new); p["check"] = False; m["parts"][i] = p; _save_man(job, k, m)
-            _assemble(j
+- The provided excerpt shows the `edWait` first two lines twice. I assumed that is a paste artifact and replaced the re-open paths inside the real single `edWait`.
+- `/make/edit` was listed in the requirement but its JS call site was not in the excerpts. If it exists in `index.html`, Claude should change its body to include `sid:ED.sid`, ideally by routing it through the new `edPost()` helper.
+- The Apply/Skip disable selector guesses button IDs/text based on the existing functions (`apply`/`skip` text). If the real buttons have different text or dedicated IDs, Claude should narrow `edSetApplyDisabled()` to those IDs.
