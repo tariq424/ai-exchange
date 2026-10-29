@@ -1,6 +1,6 @@
 # STATUS — updated by Claude after every round (sent to the reviewer with every question)
 
-Last update: 2026-10-28 22:45 EDT
+Last update: 2026-10-28 23:10 EDT
 
 ## Done (this evening)
 - Publisher `POST /delete` + `delete_video(dry_run)` + tests — written by DeepSeek, applied by Claude
@@ -19,7 +19,10 @@ Last update: 2026-10-28 22:45 EDT
   jobs. Tested on 42022 with a real Short: card, popup, video, scrubber, beat strip, six panes, source note.
 
 ## In progress
-- GPU interlock + editor priority: round 1 review accepted (all 17 points); decisions recorded in round 2 question; round 2 (patch) out.
+- GPU interlock + editor priority: round 2 core applied on video-studio-test `feature/gpu-interlock` (691935f) with Claude
+  fixes (Windows LK_LOCK 10 s limit, re-entrant lock, no file delete on force-release, no os.kill on Windows, all
+  render stages + QC locked, PORT env, apply counter, interview_edit gated). 117/117 existing tests pass.
+  Round 2b out: popup JS (sid, polling, heartbeat, banners, Resume) + unit tests.
 - Mailman hang fixed (git output to temp files, timeout kills the process tree, heartbeat file). It had hung 18:54-22:26.
 - Video Studio idle restart armed (10 h window) so the per-beat "Picture source" note goes live; the Newsroom is on
   hold (no new jobs) until that restart is done, then the hold lifts itself. No render is interrupted.
