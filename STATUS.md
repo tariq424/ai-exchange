@@ -2,6 +2,13 @@
 
 Last update: 2026-10-28 23:25 EDT
 
+## Koda sync - 2026-10-29 (merge approved by Tariq)
+- Tariq approved GO LIVE for the tested test-copy work on 2026-10-29. Full order: MERGE-ORDER.md in this repo (also posted to Claude as MSG 032 in the Claude-Koda exchange doc).
+- Stages, in order: (1) Video Studio idle restart, source note verified live; (2) Publisher feature/unified-ui incl. /delete to live, delete DRY RUN only; (3) Video Studio popup beat editor to live; (4) GPU interlock + Newsroom newsroom=true + WanGP watchdog check, then the real apply-during-render test; (5) Newsroom resubmit/move to live, last, after stage 2 verifies.
+- NOT approved: any real YouTube delete, any real move of a published video, any publishing. Those still need Tariq's separate explicit go and a throwaway video.
+- Claude is at about 98% usage per Tariq. If the cap hits mid-merge: post STATUS here (stages done/undone, exact live state), then stop - Codex picks up the same order.
+- Reviewer note: until this merge lands, the "Next" section below is the pre-approval state.
+
 ## Done (this evening)
 - Publisher `POST /delete` + `delete_video(dry_run)` + tests — written by DeepSeek, applied by Claude
   (branch `claude/publisher-delete`, 531b509; all later fixes are on `feature/unified-ui`).
