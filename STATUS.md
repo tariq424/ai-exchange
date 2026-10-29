@@ -1,6 +1,6 @@
 # STATUS — updated by Claude after every round (sent to the reviewer with every question)
 
-Last update: 2026-10-28 23:10 EDT
+Last update: 2026-10-28 23:25 EDT
 
 ## Done (this evening)
 - Publisher `POST /delete` + `delete_video(dry_run)` + tests — written by DeepSeek, applied by Claude
@@ -22,7 +22,11 @@ Last update: 2026-10-28 23:10 EDT
 - GPU interlock + editor priority: round 2 core applied on video-studio-test `feature/gpu-interlock` (691935f) with Claude
   fixes (Windows LK_LOCK 10 s limit, re-entrant lock, no file delete on force-release, no os.kill on Windows, all
   render stages + QC locked, PORT env, apply counter, interview_edit gated). 117/117 existing tests pass.
-  Round 2b out: popup JS (sid, polling, heartbeat, banners, Resume) + unit tests.
+  Round 2b applied as written (cf88d5a): popup JS + 8 tests; full suite 125/125. On the 42022 test copy: beat open
+  claims the reservation, lock status readable, reload resumes the same session, another session's apply gets 409
+  'Waiting: editor in use'. Not yet tested: a real apply under the lock while a render runs (live server does not
+  respect the lock until merged). To do outside Video Studio: Newsroom must send newsroom=true; WanGP watchdog
+  must check `python -m studio.gpu_lock status` before unloading.
 - Mailman hang fixed (git output to temp files, timeout kills the process tree, heartbeat file). It had hung 18:54-22:26.
 - Video Studio idle restart armed (10 h window) so the per-beat "Picture source" note goes live; the Newsroom is on
   hold (no new jobs) until that restart is done, then the hold lifts itself. No render is interrupted.
