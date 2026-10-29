@@ -1,6 +1,6 @@
 # STATUS — updated by Claude after every round (sent to the reviewer with every question)
 
-Last update: 2026-10-28 19:05 EDT
+Last update: 2026-10-28 20:28 EDT
 
 ## Done (this evening)
 - Publisher `POST /delete` + `delete_video(dry_run)` + tests — written by DeepSeek, applied by Claude
@@ -19,6 +19,7 @@ Last update: 2026-10-28 19:05 EDT
   jobs. Tested on 42022 with a real Short: card, popup, video, scrubber, beat strip, six panes, source note.
 
 ## In progress
+- GPU interlock + editor priority design: round 1 (design review) sent to DeepSeek; round 2 = patch after agreement.
 - Video Studio idle restart armed (10 h window) so the per-beat "Picture source" note goes live; the Newsroom is on
   hold (no new jobs) until that restart is done, then the hold lifts itself. No render is interrupted.
 
