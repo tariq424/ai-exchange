@@ -1,0 +1,23 @@
+--- a/mailman.py
++++ b/mailman.py
+@@ -53,12 +53,12 @@
+ def briefing():
+-    """The architecture briefing (CONTEXT.md in the repo), read fresh for every question; the API has no memory."""
+-    try:
+-        c = (ROOT / "CONTEXT.md").read_text(encoding="utf-8").strip()
+-        st = ROOT / "STATUS.md"   # current state, kept up to date by Claude after every round
+-        if c and st.exists(): c += "\n\n" + st.read_text(encoding="utf-8").strip()
+-        if c: return time.strftime("Current date/time on Tariq's PC: %A %Y-%m-%d %H:%M %Z\n\n") + c
+-    except Exception: pass
+-    return SYSTEM
++    """Read all three briefing files fresh; never send a question with a stale/missing board."""
++    parts = []
++    for name in ("CONTEXT.md", "STATUS.md", "BOARD.md"):
++        content = (ROOT / name).read_text(encoding="utf-8-sig").strip()
++        if not content:
++            raise ValueError(f"Required briefing file is empty: {name}")
++        parts.append(f"=== {name} ===\n{content}")
++    return time.strftime("Current date/time on Tariq's PC: %A %Y-%m-%d %H:%M %Z\n\n") + "\n\n".join(parts)
+ 
+ 
+ def ask(prompt, key, mdl):

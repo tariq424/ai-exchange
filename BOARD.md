@@ -9,9 +9,9 @@ working, so nobody designs or reports from a stale snapshot.
   Claude ↔ Koda exchange document, and anything decided there that changes the
   state below gets folded into this file.
 - DeepSeek: has NO internet and reads nothing directly. The mailman must include
-  this file in the per-question briefing (alongside CONTEXT.md + STATUS.md) —
-  PC-side change, requested 2026-10-30. Until that lands, whoever writes a
-  DeepSeek question pastes the relevant sections of this file into the question.
+  this file in the per-question briefing (alongside CONTEXT.md + STATUS.md).
+  PC-side change completed 2026-10-30: all three files are read fresh and
+  required before sending. Offline request-payload verification passed.
 - Rule: whoever finishes work updates the ledger and open items HERE in the same
   commit round as their RESULT. A claim not on this page is not agreed.
 - This repo is public: no personal data, no document IDs, no keys, ever.
@@ -94,7 +94,12 @@ over local edits.
 1. DeepSeek strategy brief: still unsent (question file empty at last check).
 2. Fox channel-tag routing: tested parser change owed (see Current state).
 3. One stalled Newsroom item: cause undiagnosed (not the Alphabet job).
-4. Mailman: add BOARD.md to the DeepSeek briefing (PC-side task, 2026-10-30).
+4. CLOSED 2026-10-30 — Mailman now includes BOARD.md alongside CONTEXT.md +
+   STATUS.md. Three offline tests verify the actual request payload, fresh
+   reads, and no network call if any required file is missing/empty. No real
+   question sent. No mailman process was running at verification; the next
+   normal launch will load the updated PC-local script. Reproducible patch:
+   patches/mailman-board-briefing.patch; tests/test_mailman_briefing.py.
 5. HANDOFF.md is stale next to STATUS.md in places; STATUS wins until refreshed.
 
 ## Standing rules (all agents)

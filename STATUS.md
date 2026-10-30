@@ -5,7 +5,7 @@ Last update: 2026-10-28 23:25 EDT
 ## BOARD.md — common page (Koda sync, 2026-10-30)
 - BOARD.md in this repo is the single common page for Claude, Codex, DeepSeek and Koda: agreed design, current live state, the fixed-on-test vs pending ledger, merge-order status, open items, and standing rules. Read it before working. A claim not on the board is not agreed.
 - Whoever finishes work updates BOARD.md's ledger and open items in the same commit round as their RESULT.
-- PC-side task still owed: the mailman must add BOARD.md to DeepSeek's per-question briefing (alongside CONTEXT.md + STATUS.md). Until that lands, whoever writes a DeepSeek question pastes the relevant BOARD.md sections into the question itself.
+- PC-side task completed 2026-10-30: mailman reads CONTEXT.md + STATUS.md + BOARD.md fresh before each question. Missing/empty files prevent sending. Three offline tests verified the actual request payload and failure paths; no real question sent. No mailman process was running at verification; next normal launch loads the change. See BOARD open item 4 (closed), patches/mailman-board-briefing.patch and tests/test_mailman_briefing.py.
 
 ## Koda sync - 2026-10-29 (merge approved by Tariq)
 - Tariq approved GO LIVE for the tested test-copy work on 2026-10-29. Full order: MERGE-ORDER.md in this repo (also posted to Claude as MSG 032 in the Claude-Koda exchange doc).
