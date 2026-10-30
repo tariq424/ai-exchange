@@ -78,7 +78,14 @@ because a ladder returned them, not because the beat needed them.
   popup and moonshots_source record/link retention verified. Ready popup
   opened from the real button; copied Short playback advanced, readyState=4,
   duration=28.544s, publish/save actions disabled. Screenshot retained locally.
-  S4–S12 pending. Production hold verified.
+  Production hold verified.
+- S4 local contract PASS after fix; real Studio edge BLOCKED by automatic
+  approval review (joined real-Studio harness launch rejected, no reason
+  supplied). Real Newsroom route -> bridge -> Publisher route exercised with
+  only Studio/auth stubbed. Two dry-run calls retained both channels/pending
+  move and did not mark Publisher record deleted. False/wrong-video deletion
+  confirmations now refused. Five regression cases pass. Not a claim that a
+  real Studio dialog was reached. S5–S12 pending.
 
 - QC v9 in fix mode is LIVE. Newsroom light theme + three panels + popup
   player are LIVE. Video Studio light page is live; the per-beat source note
