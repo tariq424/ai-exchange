@@ -85,7 +85,13 @@ because a ladder returned them, not because the beat needed them.
   only Studio/auth stubbed. Two dry-run calls retained both channels/pending
   move and did not mark Publisher record deleted. False/wrong-video deletion
   confirmations now refused. Five regression cases pass. Not a claim that a
-  real Studio dialog was reached. S5–S12 pending.
+  real Studio dialog was reached.
+- S5 PASS after test-only carousel-to-list fix: all three panels use the shared
+  popup; two rejected entries visible simultaneously; no panel videos or
+  carousel controls. Approve and reject close the popup, successful feedback
+  keeps it open. Copied media plays; Published -> Rejected reuses one popup.
+  Restricted test harness on 42041 has no dispatcher/publish/delete access.
+  S6–S12 pending.
 
 - QC v9 in fix mode is LIVE. Newsroom light theme + three panels + popup
   player are LIVE. Video Studio light page is live; the per-beat source note
