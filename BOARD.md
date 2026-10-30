@@ -67,7 +67,13 @@ because a ladder returned them, not because the beat needed them.
   dependencies and 72 sidecars; playback 156.9s, real seek, light theme,
   eight solid stage chips, source notes on bite/fact/card, empty-source safe.
   Added scrubber source note for noneditable cards on codex/msg038-smoke.
-  Controlled UI fixtures restored. S2–S12 PENDING.
+  Controlled UI fixtures restored.
+- S2 PASS: one real copied-Short beat edited and restitched through 42022
+  popup; six panes visible; last edit p00 applied, one history entry, full
+  strict FFmpeg decode exit 0, browser playback readyState=4 and time advances.
+  Second-session apply HTTP 409; Horseshoe media hash unchanged. Test-only
+  optional music library was missing (voice/video still rendered); library
+  copied for later smokes and automatic music generation disabled. S3–S12 PENDING.
 
 - QC v9 in fix mode is LIVE. Newsroom light theme + three panels + popup
   player are LIVE. Video Studio light page is live; the per-beat source note
