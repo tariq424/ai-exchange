@@ -62,7 +62,12 @@ because a ladder returned them, not because the beat needed them.
   response explicitly confirms CONTEXT.md + STATUS.md + BOARD.md. Request
   087b604, answer retained in to_claude/answer.md and the local mailman archive;
   142 seconds, 20,553 tokens. No implementation or live action authorized
-  by the critique. S1–S12 PENDING; isolated test-bed preparation in progress.
+  by the critique.
+- S1 PASS after a test-only fix: copied Nea job plus 88 hash-verified media
+  dependencies and 72 sidecars; playback 156.9s, real seek, light theme,
+  eight solid stage chips, source notes on bite/fact/card, empty-source safe.
+  Added scrubber source note for noneditable cards on codex/msg038-smoke.
+  Controlled UI fixtures restored. S2–S12 PENDING.
 
 - QC v9 in fix mode is LIVE. Newsroom light theme + three panels + popup
   player are LIVE. Video Studio light page is live; the per-beat source note
