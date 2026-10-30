@@ -74,10 +74,11 @@ because a ladder returned them, not because the beat needed them.
   Second-session apply HTTP 409; Horseshoe media hash unchanged. Test-only
   optional music library was missing (voice/video still rendered); library
   copied for later smokes and automatic music generation disabled.
-- S3 PARTIAL (resumed after cap): TEST pill/panels, POST /delete HTTP 403,
-  actual Chrome published-popup launch and moonshots_source record/link
-  retention verified. Ready-panel navigation verified. Ready-popup playback
-  and final evidence still pending; S4–S12 pending. Production hold verified.
+- S3 PASS: TEST pill/panels, POST /delete HTTP 403, actual Chrome published
+  popup and moonshots_source record/link retention verified. Ready popup
+  opened from the real button; copied Short playback advanced, readyState=4,
+  duration=28.544s, publish/save actions disabled. Screenshot retained locally.
+  S4–S12 pending. Production hold verified.
 
 - QC v9 in fix mode is LIVE. Newsroom light theme + three panels + popup
   player are LIVE. Video Studio light page is live; the per-beat source note
