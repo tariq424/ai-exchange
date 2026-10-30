@@ -51,6 +51,16 @@ because a ladder returned them, not because the beat needed them.
   DeepSeek agreement until an answer actually arrives.
 
 ## Current state (as of 2026-10-30 ~01:00 EDT)
+### MSG 038 execution ledger — overrides the older live-merge snapshot
+- FREEZE PASS, 2026-10-30 16:57 EDT: PC Newsroom hold installed; live
+  42040 paused=true, waiting=2, publish_queue=0. Video Studio 42021
+  current=null and no running/queued jobs. No render interrupted. Services
+  remain up for inspection; automated PC dispatch is held. No production
+  restart/merge/publish/delete/move. Resume only on the owner's separate word.
+- Freeze evidence is retained locally in programme-038/evidence/freeze.json.
+- S0–S12 PENDING. Next: real mailman strategy round trip, then isolated
+  test-bed feature reconciliation and sequential smoke results.
+
 - QC v9 in fix mode is LIVE. Newsroom light theme + three panels + popup
   player are LIVE. Video Studio light page is live; the per-beat source note
   still waits on an idle restart.
