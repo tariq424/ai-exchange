@@ -58,8 +58,11 @@ because a ladder returned them, not because the beat needed them.
   remain up for inspection; automated PC dispatch is held. No production
   restart/merge/publish/delete/move. Resume only on the owner's separate word.
 - Freeze evidence is retained locally in programme-038/evidence/freeze.json.
-- S0–S12 PENDING. Next: real mailman strategy round trip, then isolated
-  test-bed feature reconciliation and sequential smoke results.
+- S0 PASS: real mailman strategy round trip completed 2026-10-30 17:00 EDT;
+  response explicitly confirms CONTEXT.md + STATUS.md + BOARD.md. Request
+  087b604, answer retained in to_claude/answer.md and the local mailman archive;
+  142 seconds, 20,553 tokens. No implementation or live action authorized
+  by the critique. S1–S12 PENDING; isolated test-bed preparation in progress.
 
 - QC v9 in fix mode is LIVE. Newsroom light theme + three panels + popup
   player are LIVE. Video Studio light page is live; the per-beat source note
@@ -101,7 +104,9 @@ the clean fit-test branch lives in its own test folder. Do not reset or merge
 over local edits.
 
 ## Open items
-1. DeepSeek strategy brief: still unsent (question file empty at last check).
+1. CLOSED 2026-10-30 — DeepSeek strategy brief sent and answered in S0.
+   Read the retained critique before designing; response is not blanket
+   approval of untested implementation.
 2. Fox channel-tag routing: tested parser change owed (see Current state).
 3. One stalled Newsroom item: cause undiagnosed (not the Alphabet job).
 4. CLOSED 2026-10-30 — Mailman now includes BOARD.md alongside CONTEXT.md +
