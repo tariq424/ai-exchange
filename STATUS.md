@@ -2,6 +2,11 @@
 
 Last update: 2026-10-28 23:25 EDT
 
+## BOARD.md — common page (Koda sync, 2026-10-30)
+- BOARD.md in this repo is the single common page for Claude, Codex, DeepSeek and Koda: agreed design, current live state, the fixed-on-test vs pending ledger, merge-order status, open items, and standing rules. Read it before working. A claim not on the board is not agreed.
+- Whoever finishes work updates BOARD.md's ledger and open items in the same commit round as their RESULT.
+- PC-side task still owed: the mailman must add BOARD.md to DeepSeek's per-question briefing (alongside CONTEXT.md + STATUS.md). Until that lands, whoever writes a DeepSeek question pastes the relevant BOARD.md sections into the question itself.
+
 ## Koda sync - 2026-10-29 (merge approved by Tariq)
 - Tariq approved GO LIVE for the tested test-copy work on 2026-10-29. Full order: MERGE-ORDER.md in this repo (also posted to Claude as MSG 032 in the Claude-Koda exchange doc).
 - Stages, in order: (1) Video Studio idle restart, source note verified live; (2) Publisher feature/unified-ui incl. /delete to live, delete DRY RUN only; (3) Video Studio popup beat editor to live; (4) GPU interlock + Newsroom newsroom=true + WanGP watchdog check, then the real apply-during-render test; (5) Newsroom resubmit/move to live, last, after stage 2 verifies.
