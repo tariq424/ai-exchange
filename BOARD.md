@@ -102,7 +102,15 @@ because a ladder returned them, not because the beat needed them.
   line routes to the item channel field; pitch/brief stay clean, BREAKING
   unaffected (newsroom 6202d60; merged with S4/S5 at 331d37f on
   koda/light-theme-source-note; suite 40 passed, 4 skipped).
-  S8, S10–S12 pending.
+  S10–S12 pending.
+- S8 PASS with finding (2026-11-01, Koda via PC helper): real-vision fit
+  judgments on the combined code - Horseshoe (locked) and pink sand
+  ACCEPTED; the mosque B-roll clip judged against the Dockyard narration
+  REJECTED with reason logged. Offline fit smoke PASS; provider order
+  verified (gemini last, HF absent, gate armed on test port only).
+  Finding: the gate is over-strict on near-matches (both genuine Arts
+  Centre images rejected on quibbles) - see the exchange-doc RESULT and
+  DeepSeek's S0 tri-state advice before any live use.
 - S7 PASS (2026-11-01, Koda via PC helper): editor-session interlock driven
   over the TEST server (42022) API - second session waits (holder named),
   its apply returns HTTP 409, the holder's apply completes under the GPU
