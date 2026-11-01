@@ -102,7 +102,13 @@ because a ladder returned them, not because the beat needed them.
   line routes to the item channel field; pitch/brief stay clean, BREAKING
   unaffected (newsroom 6202d60; merged with S4/S5 at 331d37f on
   koda/light-theme-source-note; suite 40 passed, 4 skipped).
-  S10–S12 pending.
+  S11–S12 pending.
+- S10 PASS (2026-11-01, Koda via PC helper): QC v9 on the specimens -
+  A (clean Short) zero hard spans on a fresh 45-sample fix-mode run;
+  B's one HARD-class injected fault (black 50-60 s) detected, repaired
+  in fix mode, and verified gone on re-check; the sideways / upside-
+  down / blurred faults logged as SOFT per the v9 settlement; fail-open
+  held (video returned on every pass).
 - S8 PASS with finding (2026-11-01, Koda via PC helper): real-vision fit
   judgments on the combined code - Horseshoe (locked) and pink sand
   ACCEPTED; the mosque B-roll clip judged against the Dockyard narration
