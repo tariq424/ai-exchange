@@ -102,7 +102,17 @@ because a ladder returned them, not because the beat needed them.
   line routes to the item channel field; pitch/brief stay clean, BREAKING
   unaffected (newsroom 6202d60; merged with S4/S5 at 331d37f on
   koda/light-theme-source-note; suite 40 passed, 4 skipped).
-  S12 pending.
+- S12 PASS (2026-11-01, Koda via PC helper + vendor source): Blender
+  MCP route verified from the vendor repo (ahujasid/blender-mcp, MIT) -
+  package renamed to mcp-for-blender; Blender itself is NOT installed
+  on the PC yet (step 0 when Tariq says go); uv/uvx already present.
+  Route: install Blender -> add the same uvx server to Claude Code and
+  Codex -> install-addon -> enable in Blender. Cost $0; bake in
+  BLENDER_MCP_SAFE_MODE=1 + DISABLE_TELEMETRY=true; the addon socket is
+  unauthenticated, keep on localhost. Nothing installed, per S12 terms.
+- MSG 038 PROGRAMME COMPLETE (2026-11-01): FREEZE + S0-S12 all PASS
+  (S4's real-Studio delete edge remains BLOCKED as a sub-step only).
+  Production stays frozen until Tariq orders the merger.
 - S11 PASS (2026-11-01, Koda via PC helper): one sample story ran the
   whole test-bed chain under one job id (20261101_032644) - isolated
   test Newsroom (brief-fallback research) -> dispatch to Video Studio
