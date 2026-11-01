@@ -102,7 +102,17 @@ because a ladder returned them, not because the beat needed them.
   line routes to the item channel field; pitch/brief stay clean, BREAKING
   unaffected (newsroom 6202d60; merged with S4/S5 at 331d37f on
   koda/light-theme-source-note; suite 40 passed, 4 skipped).
-  S11–S12 pending.
+  S12 pending.
+- S11 PASS (2026-11-01, Koda via PC helper): one sample story ran the
+  whole test-bed chain under one job id (20261101_032644) - isolated
+  test Newsroom (brief-fallback research) -> dispatch to Video Studio
+  test 42022 (smoke mode) -> real render -> staged back in the Newsroom
+  under the same id ([PROCESSED] line names it) -> approve + publish
+  reached Publisher TEST 42031, which refused the upload action itself
+  ("TEST copy: actions are disabled") - the one stubbed edge. Test-env
+  gaps fixed on the test side only: config minutes 1->8, kokoro_python
+  repointed at the live app's Kokoro env, faster-whisper installed in
+  the test venv.
 - S10 PASS (2026-11-01, Koda via PC helper): QC v9 on the specimens -
   A (clean Short) zero hard spans on a fresh 45-sample fix-mode run;
   B's one HARD-class injected fault (black 50-60 s) detected, repaired
