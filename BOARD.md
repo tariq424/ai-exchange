@@ -92,6 +92,17 @@ because a ladder returned them, not because the beat needed them.
   keeps it open. Copied media plays; Published -> Rejected reuses one popup.
   Restricted test harness on 42041 has no dispatcher/publish/delete access.
   S6–S12 pending.
+- S6 PASS (2026-11-01, completed via PC helper after Codex's cap): joined
+  resubmit/move flow reproduced (smoke_s6_joined.py exit 0; only a dry-run
+  delete call was made). Visible confirmation checked in the shared player:
+  a Move waiting card names both channels, with Delete-from-old and
+  Cancel-move buttons behind a confirm dialog naming the video. All 5
+  delete-confirmation tests pass, incl. false/wrong confirmation refused.
+- S9 PASS (2026-11-01, Koda patch): a trailing | CHANNEL: <slug> on an inbox
+  line routes to the item channel field; pitch/brief stay clean, BREAKING
+  unaffected (newsroom 6202d60; merged with S4/S5 at 331d37f on
+  koda/light-theme-source-note; suite 40 passed, 4 skipped).
+  S7, S8, S10–S12 pending.
 
 - QC v9 in fix mode is LIVE. Newsroom light theme + three panels + popup
   player are LIVE. Video Studio light page is live; the per-beat source note
@@ -136,7 +147,7 @@ over local edits.
 1. CLOSED 2026-10-30 — DeepSeek strategy brief sent and answered in S0.
    Read the retained critique before designing; response is not blanket
    approval of untested implementation.
-2. Fox channel-tag routing: tested parser change owed (see Current state).
+2. CLOSED 2026-11-01 - Fox channel-tag routing done in S9 (see ledger).
 3. One stalled Newsroom item: cause undiagnosed (not the Alphabet job).
 4. CLOSED 2026-10-30 — Mailman now includes BOARD.md alongside CONTEXT.md +
    STATUS.md. Three offline tests verify the actual request payload, fresh
