@@ -102,7 +102,12 @@ because a ladder returned them, not because the beat needed them.
   line routes to the item channel field; pitch/brief stay clean, BREAKING
   unaffected (newsroom 6202d60; merged with S4/S5 at 331d37f on
   koda/light-theme-source-note; suite 40 passed, 4 skipped).
-  S7, S8, S10–S12 pending.
+  S8, S10–S12 pending.
+- S7 PASS (2026-11-01, Koda via PC helper): editor-session interlock driven
+  over the TEST server (42022) API - second session waits (holder named),
+  its apply returns HTTP 409, the holder's apply completes under the GPU
+  lock and re-splices the output (file hash changed); session frees on
+  close. Queue priority covered by tests/test_editor_priority.py.
 
 - QC v9 in fix mode is LIVE. Newsroom light theme + three panels + popup
   player are LIVE. Video Studio light page is live; the per-beat source note
